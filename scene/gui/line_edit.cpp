@@ -649,6 +649,7 @@ void LineEdit::_notification(int p_what) {
 			if (Engine::get_singleton()->is_editor_hint() && !get_tree()->is_node_being_edited(this)) {
 				cursor_set_blink_enabled(EDITOR_DEF("text_editor/cursor/caret_blink", false));
 				cursor_set_blink_speed(EDITOR_DEF("text_editor/cursor/caret_blink_speed", 0.65));
+				cursor_set_force_displayed(EDITOR_DEF("text_editor/cursor/caret_force_displayed", false));
 
 				if (!EditorSettings::get_singleton()->is_connected("settings_changed", this, "_editor_settings_changed")) {
 					EditorSettings::get_singleton()->connect("settings_changed", this, "_editor_settings_changed");
@@ -656,6 +657,11 @@ void LineEdit::_notification(int p_what) {
 			}
 		} break;
 #endif
+		case NOTIFICATION_READY: {
+			if (caret_blink_enabled) {
+				caret_blink_timer->start();
+			}
+		} break;
 		case NOTIFICATION_RESIZED: {
 
 			window_pos = 0;
@@ -674,12 +680,11 @@ void LineEdit::_notification(int p_what) {
 		} break;
 		case MainLoop::NOTIFICATION_WM_FOCUS_OUT: {
 			window_has_focus = false;
-			draw_caret = false;
+			draw_caret = force_caret_displayed;
 			update();
 		} break;
 		case NOTIFICATION_DRAW: {
-
-			if ((!has_focus() && !menu->has_focus()) || !window_has_focus) {
+			if ((!has_focus() && !menu->has_focus() && !force_caret_displayed) || !window_has_focus) {
 				draw_caret = false;
 			}
 
@@ -902,7 +907,7 @@ void LineEdit::_notification(int p_what) {
 		} break;
 		case NOTIFICATION_FOCUS_ENTER: {
 
-			if (caret_blink_enabled) {
+			if (caret_blink_enabled && caret_blink_timer->is_stopped()) {
 				caret_blink_timer->start();
 			} else {
 				draw_caret = true;
@@ -924,7 +929,7 @@ void LineEdit::_notification(int p_what) {
 		} break;
 		case NOTIFICATION_FOCUS_EXIT: {
 
-			if (caret_blink_enabled) {
+			if (caret_blink_enabled && !force_caret_displayed) {
 				caret_blink_timer->stop();
 			}
 
@@ -1149,13 +1154,35 @@ void LineEdit::cursor_set_blink_enabled(const bool p_enabled) {
 
 	if (has_focus()) {
 		if (p_enabled) {
-			caret_blink_timer->start();
+			if (caret_blink_timer->is_stopped()) {
+				caret_blink_timer->start();
+			}
 		} else {
 			caret_blink_timer->stop();
 		}
 	}
 
 	draw_caret = true;
+}
+
+bool LineEdit::cursor_get_force_displayed() const {
+	return force_caret_displayed;
+}
+
+void LineEdit::cursor_set_force_displayed(const bool p_enabled) {
+	force_caret_displayed = p_enabled;
+	if (p_enabled && caret_blink_timer->is_inside_tree()) {
+		if (caret_blink_timer->is_stopped()) {
+			caret_blink_timer->start();
+		}
+		draw_caret = true;
+	} else {
+		if (!caret_blink_timer->is_stopped()) {
+			caret_blink_timer->stop();
+		}
+		draw_caret = false;
+	}
+	update();
 }
 
 float LineEdit::cursor_get_blink_speed() const {
@@ -1180,7 +1207,7 @@ void LineEdit::_reset_caret_blink_timer() {
 
 void LineEdit::_toggle_draw_caret() {
 	draw_caret = !draw_caret;
-	if (is_visible_in_tree() && has_focus() && window_has_focus) {
+	if (is_visible_in_tree() && (has_focus() || force_caret_displayed) && window_has_focus) {
 		update();
 	}
 }
@@ -1790,6 +1817,8 @@ void LineEdit::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("cursor_get_blink_enabled"), &LineEdit::cursor_get_blink_enabled);
 	ClassDB::bind_method(D_METHOD("cursor_set_blink_speed", "blink_speed"), &LineEdit::cursor_set_blink_speed);
 	ClassDB::bind_method(D_METHOD("cursor_get_blink_speed"), &LineEdit::cursor_get_blink_speed);
+	ClassDB::bind_method(D_METHOD("cursor_set_force_displayed", "enabled"), &LineEdit::cursor_set_force_displayed);
+	ClassDB::bind_method(D_METHOD("cursor_get_force_displayed"), &LineEdit::cursor_get_force_displayed);
 	ClassDB::bind_method(D_METHOD("set_max_length", "chars"), &LineEdit::set_max_length);
 	ClassDB::bind_method(D_METHOD("get_max_length"), &LineEdit::get_max_length);
 	ClassDB::bind_method(D_METHOD("append_at_cursor", "text"), &LineEdit::append_at_cursor);
@@ -1851,6 +1880,7 @@ void LineEdit::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "caret_blink"), "cursor_set_blink_enabled", "cursor_get_blink_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::REAL, "caret_blink_speed", PROPERTY_HINT_RANGE, "0.1,10,0.01"), "cursor_set_blink_speed", "cursor_get_blink_speed");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "caret_position"), "set_cursor_position", "get_cursor_position");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "caret_force_displayed"), "cursor_set_force_displayed", "cursor_get_force_displayed");
 }
 
 LineEdit::LineEdit() {
@@ -1881,6 +1911,7 @@ LineEdit::LineEdit() {
 
 	draw_caret = true;
 	caret_blink_enabled = false;
+	force_caret_displayed = false;
 	caret_blink_timer = memnew(Timer);
 	add_child(caret_blink_timer);
 	caret_blink_timer->set_wait_time(0.65);
